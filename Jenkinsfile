@@ -1,63 +1,94 @@
 pipeline {
     agent any
+    
     tools{
-        jdk  'jdk11'
-        maven  'maven3'
+        jdk 'jdk17'
+        maven 'maven3'
     }
     
     environment{
-        SCANNER_HOME= tool 'sonar-scanner'
+        
+        SCANNER_HOME=tool 'sonar-scanner'
     }
-    
+
     stages {
         stage('Git Checkout') {
             steps {
-                git branch: 'main', changelog: false, credentialsId: '15fb69c3-3460-4d51-bd07-2b0545fa5151', poll: false, url: 'https://github.com/jaiswaladi246/Shopping-Cart.git'
+                git branch: 'main', url: 'https://github.com/srijanga/Ekart.git'
             }
         }
         
-        stage('COMPILE') {
+        stage('Compile') {
             steps {
-                sh "mvn clean compile -DskipTests=true"
+                sh "mvn compile"
+            }
+        }
+        
+        stage('Tests') {
+            steps {
+                sh "mvn test -DskipTests=true"
             }
         }
         
         stage('OWASP Scan') {
             steps {
-                dependencyCheck additionalArguments: '--scan ./ ', odcInstallation: 'DP'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                dependencyCheck additionalArguments: ' --scan ./ ', odcInstallation: 'DC'
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
         
-        stage('Sonarqube') {
+        // stage('Trivy FS') {
+        //     steps {
+        //         sh "trivy fs ."
+        //     }
+        // }
+        
+        stage('Sonarqube Analysis') {
             steps {
-                withSonarQubeEnv('sonar-server'){
-                   sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Shopping-Cart \
-                   -Dsonar.java.binaries=. \
-                   -Dsonar.projectKey=Shopping-Cart '''
-               }
+                withSonarQubeEnv('sonar') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Ekart \
+                    -Dsonar.projectKey=Ekart -Dsonar.java.binaries=. '''
+                }
             }
         }
         
         stage('Build') {
             steps {
-                sh "mvn clean package -DskipTests=true"
+                sh "mvn package -DskipTests=true"
             }
         }
         
-        stage('Docker Build & Push') {
+        stage('Build and Tag Docker Image') {
             steps {
                 script{
-                    withDockerRegistry(credentialsId: '2fe19d8a-3d12-4b82-ba20-9d22e6bf1672', toolName: 'docker') {
-                        
-                        sh "docker build -t shopping-cart -f docker/Dockerfile ."
-                        sh "docker tag  shopping-cart adijaiswal/shopping-cart:latest"
-                        sh "docker push adijaiswal/shopping-cart:latest"
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        sh "docker build -t shopping-cart:dev -f docker/Dockerfile . "
+                        sh "docker tag shopping-cart:dev srijanga/shopping-cart:dev "
                     }
                 }
             }
         }
         
+        stage('Push Docker Image') {
+            steps {
+                script{
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        
+                        sh "docker push srijanga/shopping-cart:dev "
+                    }
+                }
+            }
+        }
         
+        stage('Deploy in Docker Container') {
+            steps {
+                script{
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        
+                        sh "docker run -d -p 8070:8070 srijanga/shopping-cart:dev "
+                    }
+                }
+            }
+        }
     }
 }
